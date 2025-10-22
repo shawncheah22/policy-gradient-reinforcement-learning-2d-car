@@ -1,44 +1,51 @@
-import gymnasium as gym
-import numpy as np
-from collections import deque
-import cv2 # OpenCV for image processing
+from racing_env import CarRacingEnv
+from agent import Agent
+import torch
 
-class CarRacingEnv:
-    def __init__(self, n_stack=4, img_size=(84, 84)):
-        self.env = gym.make('CarRacing-v2', continuous=True)
-        self.img_size = img_size
-        self.n_stack = n_stack
-        self.frames = deque(maxlen=self.n_stack)
+# --- 1. Initialization ---
+env = CarRacingEnv()
+agent = Agent(n_actions=3, learning_rate=1e-4)
+total_rewards = []
+total_episodes = 1000
 
-    def _preprocess(self, frame):
-        # 1. Convert to grayscale
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        # 2. Crop the bottom part (scores/text) and resize
-        frame = frame[:84, 6:90] # Crop to 84x84
-        frame = cv2.resize(frame, self.img_size, interpolation=cv2.INTER_AREA)
-        # 3. Normalize pixel values
-        return frame / 255.0
+# --- 2. The Main Training Loop ---
+for episode in range(total_episodes):
+    # Reset the environment at the start of each episode
+    state = env.reset()
+    episode_reward = 0
+    done = False
+    
+    # --- 3. The Episode Loop ---
+    while not done:
+        # Convert state to a PyTorch tensor
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        
+        # Get action and log_prob from the policy network
+        action, log_prob = agent.policy_network(state_tensor)
+        
+        # Detach action from the computation graph and convert to numpy
+        action_np = action.detach().squeeze(0).numpy()
+        action_np[1] += 500
+        
+        # Take the action in the environment
+        next_state, reward, done = env.step(action_np)
+        
+        # Store the reward and log_prob
+        agent.rewards.append(reward)
+        agent.log_probs.append(log_prob.sum()) # Sum log_probs for all actions
+        
+        state = next_state
+        episode_reward += reward
+        
+    # --- 4. Perform the Update ---
+    agent.update()
+    
+    # --- 5. Logging ---
+    total_rewards.append(episode_reward)
+    print(f"Episode {episode+1}: Total Reward: {episode_reward:.2f}")
 
-    def reset(self):
-        """Resets the environment and returns the initial state."""
-        frame, _ = self.env.reset()
-        processed_frame = self._preprocess(frame)
-        # For the first state, we stack the same frame n_stack times
-        for _ in range(self.n_stack):
-            self.frames.append(processed_frame)
-        return np.array(self.frames)
+    if (episode + 1) % 50 == 0:
+        torch.save(agent.policy_network.state_dict(), 'car_agent_weights.pth')
+        print(f"--- Model saved at episode {episode+1} ---")
 
-    def step(self, action):
-        """Takes an action and returns the next state, reward, and done flag."""
-        next_frame, reward, terminated, truncated, _ = self.env.step(action)
-        done = terminated or truncated
-        
-        processed_frame = self._preprocess(next_frame)
-        self.frames.append(processed_frame)
-        
-        next_state = np.array(self.frames)
-        
-        return next_state, reward, done
-        
-    def close(self):
-        self.env.close()
+env.close()
