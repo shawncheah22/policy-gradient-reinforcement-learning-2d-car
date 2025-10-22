@@ -41,6 +41,7 @@ class Agent:
         # Summing the loss before backprop is more efficient
         loss_tensor = torch.stack(loss).sum()
         loss_tensor.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
         self.optimizer.step()
         
         # 5. Clear memory for the next episode

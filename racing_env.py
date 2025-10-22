@@ -5,7 +5,7 @@ import cv2 # OpenCV for image processing
 
 class CarRacingEnv:
     def __init__(self, n_stack=4, img_size=(84, 84)):
-        self.env = gym.make('CarRacing-v2', continuous=True)
+        self.env = gym.make('CarRacing-v3', continuous=True)
         self.img_size = img_size
         self.n_stack = n_stack
         self.frames = deque(maxlen=self.n_stack)

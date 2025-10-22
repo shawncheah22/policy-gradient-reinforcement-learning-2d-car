@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import torch.distributions as Normal
+from torch.distributions import Normal
 
 class PolicyNetwork(nn.Module):
     def __init__(self, n_actions):
@@ -48,5 +48,5 @@ class PolicyNetwork(nn.Module):
         distribution = Normal(mean, std)
         action = distribution.rsample()
         log_prob = distribution.log_prob(action)
-        
+
         return action, log_prob
