@@ -26,7 +26,10 @@ class Agent:
             discounted_returns.insert(0, current_return) 
 
         # 2. Normalize the returns
-        returns_tensor = torch.tensor(discounted_returns, dtype=torch.float32)
+        # Place returns on the same device as the policy network so operations
+        # with log-probs (which live on that device) work correctly.
+        device = next(self.policy_network.parameters()).device
+        returns_tensor = torch.tensor(discounted_returns, dtype=torch.float32, device=device)
         returns_tensor = (returns_tensor - returns_tensor.mean()) / (returns_tensor.std() + 1e-9)
 
         # 3. Calulate Loss

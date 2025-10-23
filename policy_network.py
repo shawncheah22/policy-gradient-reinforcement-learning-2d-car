@@ -34,6 +34,13 @@ class PolicyNetwork(nn.Module):
         self.layer_norm2 = nn.LayerNorm(512)
         self.layer_norm3 = nn.LayerNorm(256)
 
+        # Add action bounds as class attributes
+        self.action_bounds = {
+            'steering': (-1.0, 1.0),    # Left to right
+            'gas': (0.0, 1.0),         # No gas to full gas
+            'brake': (0.0, 1.0)        # No brake to full brake
+        }
+
     def _get_conv_out(self, x):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
@@ -60,10 +67,42 @@ class PolicyNetwork(nn.Module):
         
         mean = self.actor_mean(mean_hidden)
         log_std = self.actor_log_std(log_std_hidden)
-        std = log_std.exp()
+
+        # Prevent log_std from exploding / producing NaNs
+        log_std = torch.clamp(log_std, min=-20.0, max=2.0)
+        std = log_std.exp().clamp(min=1e-6)
 
         distribution = Normal(mean, std)
-        action = distribution.rsample()
-        log_prob = distribution.log_prob(action)
+        raw_action = distribution.rsample()
+        log_prob = distribution.log_prob(raw_action).sum(dim=-1, keepdim=True)
 
-        return action, log_prob
+        correction = torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-6)
+        correction = correction.sum(dim=-1, keepdim=True)
+
+        final_log_prob = log_prob - correction
+
+        # Replace the manual scaling with a more explicit bounds handling
+        steering = torch.tanh(raw_action[:, 0])  # Already in [-1, 1]
+        
+        # Scale gas from [-1, 1] to [0, 1]
+        gas = torch.sigmoid(raw_action[:, 1])    # Ensures [0, 1] bound
+        
+        # Scale brake from [-1, 1] to [0, 1]
+        brake = torch.sigmoid(raw_action[:, 2])  # Ensures [0, 1] bound
+        
+        # Stack the bounded actions
+        scaled_action = torch.stack([
+            steering,
+            gas,
+            brake
+        ], dim=1)
+
+        # Add bounds checking for safety
+        assert torch.all(scaled_action[:, 0].ge(-1) & scaled_action[:, 0].le(1)), "Steering out of bounds"
+        assert torch.all(scaled_action[:, 1:].ge(0) & scaled_action[:, 1:].le(1)), "Gas/Brake out of bounds"
+
+        return scaled_action, final_log_prob
+
+    def get_action_bounds(self):
+        """Returns the action bounds for each action dimension"""
+        return self.action_bounds
