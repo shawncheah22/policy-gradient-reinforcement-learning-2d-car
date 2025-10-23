@@ -1,0 +1,4 @@
+torch>=2.0.0
+gymnasium[box2d]>=0.29.0  # This includes the CarRacing environment
+numpy>=1.21.0
+opencv-python>=4.8.0
