@@ -49,7 +49,7 @@ for episode in range(start_episode, total_episodes):
         state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
 
         # Get action and log_prob from the policy network
-        action, log_prob = agent.policy_network(state_tensor)
+        action, log_prob, state_value = agent.policy_network.forward(state_tensor)
 
         # Detach action from the computation graph and convert to numpy
         # move to CPU before converting to numpy
@@ -71,6 +71,7 @@ for episode in range(start_episode, total_episodes):
         # Store the shaped reward and log_prob
         agent.rewards.append(shaped_reward)
         agent.log_probs.append(log_prob.sum()) # Sum log_probs for all actions
+        agent.state_values.append(state_value) 
 
         state = next_state
         episode_reward += reward  # Keep original reward for logging

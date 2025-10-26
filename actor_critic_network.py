@@ -4,9 +4,9 @@ import torch.nn.functional as F
 import numpy as np
 from torch.distributions import Normal
 
-class PolicyNetwork(nn.Module):
+class ActorCriticNetwork(nn.Module):
     def __init__(self, n_actions):
-        super(PolicyNetwork, self).__init__()
+        super(ActorCriticNetwork, self).__init__()
         # 🧠 Convolutional layers to process the image
         self.conv1 = nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
@@ -40,6 +40,11 @@ class PolicyNetwork(nn.Module):
             'gas': (0.0, 1.0),         # No gas to full gas
             'brake': (0.0, 1.0)        # No brake to full brake
         }
+        # Critic network layers
+        self.critic_hidden = nn.Linear(256, 256)
+        self.critic_hidden_2 = nn.Linear(256, 256)
+        self.critic_head = nn.Linear(256, 1)
+
 
     def _get_conv_out(self, x):
         x = F.relu(self.conv1(x))
@@ -64,6 +69,7 @@ class PolicyNetwork(nn.Module):
         # Separate processing for mean and log_std
         mean_hidden = F.relu(self.actor_mean_hidden(x))
         log_std_hidden = F.relu(self.actor_log_std_hidden(x))
+        
         
         mean = self.actor_mean(mean_hidden)
         log_std = self.actor_log_std(log_std_hidden)
@@ -101,7 +107,10 @@ class PolicyNetwork(nn.Module):
         assert torch.all(scaled_action[:, 0].ge(-1) & scaled_action[:, 0].le(1)), "Steering out of bounds"
         assert torch.all(scaled_action[:, 1:].ge(0) & scaled_action[:, 1:].le(1)), "Gas/Brake out of bounds"
 
-        return scaled_action, final_log_prob
+        critic_hidden = F.relu(self.critic_hidden(x))
+        value = self.critic_head(critic_hidden)
+
+        return scaled_action, final_log_prob, value
 
     def get_action_bounds(self):
         """Returns the action bounds for each action dimension"""
