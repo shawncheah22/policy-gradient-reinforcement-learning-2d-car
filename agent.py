@@ -18,7 +18,7 @@ class Agent:
         self.gamma = 0.99  # Discount factor
 
 
-def update(self):
+    def update(self):
         # 1. Calculate discounted returns (G_t)
         # This part was correct!
         discounted_returns = []

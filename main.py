@@ -19,7 +19,7 @@ total_episodes = 1000
 start_episode = 0
 try:
     checkpoint = torch.load('car_agent_checkpoint.pth', map_location=device)
-    agent.policy_network.load_state_dict(checkpoint['model_state_dict'])
+    agent.policy_network.load_state_dict(checkpoint['model_state_dict'])  # Allow missing keys
     agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     # Move optimizer state tensors to device (if any tensors are present)
     for state in agent.optimizer.state.values():
