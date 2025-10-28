@@ -1,50 +1,38 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from torch.distributions import Normal
 
-class ActorCriticNetwork(nn.Module):
+class SACNetwork(nn.Module):
     def __init__(self, n_actions):
-        super(ActorCriticNetwork, self).__init__()
-        # 🧠 Convolutional layers to process the image
+        super(SACNetwork, self).__init__()
+        
+        # 1. --- Shared CNN Trunk (processes the state image) ---
         self.conv1 = nn.Conv2d(in_channels=4, out_channels=32, kernel_size=8, stride=4)
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2)
         self.conv3 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1)
         
-        # We need to calculate the size of the output from the conv layers
-        # A quick way is to pass a dummy tensor through the conv layers
         dummy_input = torch.randn(1, 4, 84, 84)
         conv_out_size = self._get_conv_out(dummy_input)
 
-        # 🧠 Fully connected layers with gradually decreasing size
-        self.fc1 = nn.Linear(conv_out_size, 1024)
-        self.fc2 = nn.Linear(1024, 512)
-        self.fc3 = nn.Linear(512, 256)
-        
-        # Separate branches for mean and std to allow different feature processing
-        self.actor_mean_hidden = nn.Linear(256, 128)
-        self.actor_log_std_hidden = nn.Linear(256, 128)
-        
-        self.actor_mean = nn.Linear(128, n_actions)
-        self.actor_log_std = nn.Linear(128, n_actions)
-        
-        # Layer normalization for better training stability
-        self.layer_norm1 = nn.LayerNorm(1024)
-        self.layer_norm2 = nn.LayerNorm(512)
-        self.layer_norm3 = nn.LayerNorm(256)
+        # 2. --- Actor Head (State -> Action) ---
+        # This has its own FC layers
+        self.actor_fc1 = nn.Linear(conv_out_size, 256)
+        self.actor_fc2 = nn.Linear(256, 256)
+        self.actor_mean = nn.Linear(256, n_actions)
+        self.actor_log_std = nn.Linear(256, n_actions)
 
-        # Add action bounds as class attributes
-        self.action_bounds = {
-            'steering': (-1.0, 1.0),    # Left to right
-            'gas': (0.0, 1.0),         # No gas to full gas
-            'brake': (0.0, 1.0)        # No brake to full brake
-        }
-        # Critic network layers
-        self.critic_hidden = nn.Linear(256, 256)
-        self.critic_hidden_2 = nn.Linear(256, 256)
-        self.critic_head = nn.Linear(256, 1)
-
+        # 3. --- Critic 1 Head (State + Action -> Q-Value) ---
+        # This trunk must combine state (conv_out_size) and action (n_actions)
+        self.critic_1_fc1 = nn.Linear(conv_out_size + n_actions, 256)
+        self.critic_1_fc2 = nn.Linear(256, 256)
+        self.critic_1_head = nn.Linear(256, 1)
+        
+        # 4. --- Critic 2 Head (State + Action -> Q-Value) ---
+        # Identical to Critic 1
+        self.critic_2_fc1 = nn.Linear(conv_out_size + n_actions, 256)
+        self.critic_2_fc2 = nn.Linear(256, 256)
+        self.critic_2_head = nn.Linear(256, 1)
 
     def _get_conv_out(self, x):
         x = F.relu(self.conv1(x))
@@ -52,66 +40,47 @@ class ActorCriticNetwork(nn.Module):
         x = F.relu(self.conv3(x))
         return int(np.prod(x.size()))
 
-    def forward(self, x):
-        # Pass input through conv layers
-        x = F.relu(self.conv1(x))
+    # --- We now need three separate forward methods ---
+
+    def forward_actor(self, state):
+        """Processes a state and returns an action and log_prob."""
+        # Pass state through CNN trunk
+        x = F.relu(self.conv1(state))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
+        x = x.view(x.size(0), -1) # Flatten
         
-        # Flatten the output for the fully connected layers
-        x = x.view(x.size(0), -1) 
+        # Pass through Actor's own FC layers
+        x = F.relu(self.actor_fc1(x))
+        x = F.relu(self.actor_fc2(x))
         
-        # Apply fully connected layers with layer normalization and ReLU
-        x = F.relu(self.layer_norm1(self.fc1(x)))
-        x = F.relu(self.layer_norm2(self.fc2(x)))
-        x = F.relu(self.layer_norm3(self.fc3(x)))
+        # ... (rest of the action generation logic: mean, std, sample, log_prob) ...
+        mean = self.actor_mean(x)
+        log_std = self.actor_log_std(x)
+        # ... (rest of your logic from before) ...
         
-        # Separate processing for mean and log_std
-        mean_hidden = F.relu(self.actor_mean_hidden(x))
-        log_std_hidden = F.relu(self.actor_log_std_hidden(x))
+        scaled_action, final_log_prob = ... # (Your tanh squashing logic)
+        return scaled_action, final_log_prob
+
+    def forward_critic(self, state, action):
+        """Processes a state AND an action, returns Q-values from both critics."""
+        # Pass state through CNN trunk
+        x = F.relu(self.conv1(state))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = x.view(x.size(0), -1) # Flatten
         
+        # Concatenate the flattened state features with the action
+        sa = torch.cat([x, action], dim=1) # sa = state-action
         
-        mean = self.actor_mean(mean_hidden)
-        log_std = self.actor_log_std(log_std_hidden)
-
-        # Prevent log_std from exploding / producing NaNs
-        log_std = torch.clamp(log_std, min=-20.0, max=2.0)
-        std = log_std.exp().clamp(min=1e-6)
-
-        distribution = Normal(mean, std)
-        raw_action = distribution.rsample()
-        log_prob = distribution.log_prob(raw_action).sum(dim=-1, keepdim=True)
-
-        correction = torch.log(1 - torch.tanh(raw_action).pow(2) + 1e-6)
-        correction = correction.sum(dim=-1, keepdim=True)
-
-        final_log_prob = log_prob - correction
-
-        # Replace the manual scaling with a more explicit bounds handling
-        steering = torch.tanh(raw_action[:, 0])  # Already in [-1, 1]
+        # --- Critic 1 ---
+        q1 = F.relu(self.critic_1_fc1(sa))
+        q1 = F.relu(self.critic_1_fc2(q1))
+        q1 = self.critic_1_head(q1)
         
-        # Scale gas from [-1, 1] to [0, 1]
-        gas = torch.sigmoid(raw_action[:, 1])    # Ensures [0, 1] bound
+        # --- Critic 2 ---
+        q2 = F.relu(self.critic_2_fc1(sa))
+        q2 = F.relu(self.critic_2_fc2(q2))
+        q2 = self.critic_2_head(q2)
         
-        # Scale brake from [-1, 1] to [0, 1]
-        brake = torch.sigmoid(raw_action[:, 2])  # Ensures [0, 1] bound
-        
-        # Stack the bounded actions
-        scaled_action = torch.stack([
-            steering,
-            gas,
-            brake
-        ], dim=1)
-
-        # Add bounds checking for safety
-        assert torch.all(scaled_action[:, 0].ge(-1) & scaled_action[:, 0].le(1)), "Steering out of bounds"
-        assert torch.all(scaled_action[:, 1:].ge(0) & scaled_action[:, 1:].le(1)), "Gas/Brake out of bounds"
-
-        critic_hidden = F.relu(self.critic_hidden(x))
-        value = self.critic_head(critic_hidden)
-
-        return scaled_action, final_log_prob, value
-
-    def get_action_bounds(self):
-        """Returns the action bounds for each action dimension"""
-        return self.action_bounds
+        return q1, q2

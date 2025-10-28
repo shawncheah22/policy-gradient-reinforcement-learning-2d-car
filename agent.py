@@ -1,11 +1,11 @@
 import torch.optim as optim
-from actor_critic_network import ActorCriticNetwork
+from actor_critic_network import SACNetwork
 import torch
 
 class Agent:
     def __init__(self, n_actions, learning_rate=1e-4):
         # The agent's "brain"
-        self.policy_network = ActorCriticNetwork(n_actions)
+        self.policy_network = SACNetwork(n_actions)
         
         # The optimizer for learning
         self.optimizer = optim.Adam(self.policy_network.parameters(), lr=learning_rate)
