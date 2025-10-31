@@ -6,6 +6,7 @@ from torch.distributions import Normal
 import numpy as np
 import random
 from collections import deque
+from actor_critic_network import ActorNetwork, CriticNetwork
 
 # --- We need a Replay Buffer class ---
 class ReplayBuffer:
