@@ -5,13 +5,6 @@ import torch
 # --- 1. Initialization ---
 env = CarRacingEnv()
 
-from racing_env import CarRacingEnv
-from agent import SACAgent
-import torch
-
-# --- 1. Initialization ---
-env = CarRacingEnv()
-
 # Select device (GPU if available)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
